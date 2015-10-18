@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head lang="en">
+    <meta charset="UTF-8">
+    <title></title>
+    <script src="http://localhost:9000/assets/javascripts/jquery-1.11.2.min.js"></script>
+    <script src="http://localhost:9000/assets/javascripts/bootstrap.min.js"></script>
+    <script src="http://localhost:9000/assets/javascripts/ember-template-compiler.js"></script>
+    <script src="http://localhost:9000/assets/javascripts/ember.js"></script>
+    <script type="text/javascript" src="ember-uploader.min.js"></script>
+    <script type="text/x-handlebars" data-template-name="application">
+        <div class="container">
+            <div class="panel-group" id="accordion">
+                <div class="panel panel-primary">
+                    <div id="collapse2" class="panel-collapse collapse in">
+                        {{outlet}}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </script>
+    <script>
+        jsonTask = {};
+
+        App = Ember.Application.create({
+            rootElement: '#ember-app'
+        });
+
+        App.Router.map(function () {
+            this.resource('index', {path: '/'});
+        });
+
+        App.ApplicationRoute = Ember.Route.extend({
+            model: function () {
+                return jsonTask;
+            },
+            actions: {
+                submitAction: function(source) {
+                    this.get('controller.relatedsViewInstance').send('submitAction', source);
+                    $('#emberForm').submit();
+                }
+            }
+        });
+        App.ApplicationController = Ember.Controller.extend({});
+        App.ApplicationView = Ember.View.extend({
+            didInsertElement: function () {
+                Ember.run.scheduleOnce('afterRender', this, 'afterRenderEvent');
+            },
+            afterRenderEvent: function () {
+//                this.get('relatedsViewInstance').send('refreshRelateds', this);
+//                this.set('controller.relatedsViewInstance', this.get('relatedsViewInstance'));
+            }
+        });
+
+        if (typeof flowURL == 'undefined'){
+            var flowURL = "";
+        }
+        var optionIndex = 0;
+        var facts = jsonTask.FACTS;
+
+        App.IndexRoute = Ember.Route.extend({
+            model: function () {
+                return jsonTask;
+            }
+        });
+
+        App.IndexController = Ember.Controller.extend(Ember.TargetActionSupport, {
+            facts: jsonTask.FACTS,
+            percentage: 0
+        });
+
+        window.App.IndexController.reopen({
+            actions: {
+            }
+        });
+
+        App.FileUploadComponent = EmberUploader.FileField.extend({
+            url: '',
+            filesDidChange: function(files) {
+                var uploadUrl = this.get('url');
+
+                var uploader = EmberUploader.Uploader.create({
+                    url: uploadUrl
+                });
+
+                if (!Ember.isEmpty(files)) {
+                    uploader.upload(files[0]);
+                }
+            }
+        });
+
+        var uploader = EmberUploader.Uploader.create({
+            url: '/upload',
+            type: 'PUT'
+        });
+
+        uploader.on('progress', function(e) {
+            // Handle progress changes
+            // Use `e.percent` to get percentage
+            this.set('percentage', e.percent);
+        });
+
+    </script>
+    <script type="text/x-handlebars" data-template-name="index">
+        foobar
+        {{file-upload url="/upload"}}
+        {{controller.percentage}}
+    </script>
+</head>
+<body>
+<div id="ember-app"></div>
+</body>
+</html>

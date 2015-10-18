@@ -1,0 +1,463 @@
+    <script type="text/javascript">
+        var baseURL = window.location.protocol + '//' + window.location.hostname + (window.location.port ? ':' + window.location.port : '');
+
+        App.FileController = Ember.Controller.extend({
+            init: function () {
+                console.log("fileinit");
+            },
+            queryParams: {path: "", containerid: ""},
+            containerid: null,
+            path: null,
+            showShareList: true,
+            bPopUp: null,
+            isFileListEmpty: true,
+            dataArray: function () {
+                var dA = Ember.A();
+                var raw = this.get("model");
+                for (var i in raw) {
+                    dA.pushObject(raw[i]);
+                }
+                return dA
+            }.property("model"),
+            filelist: Ember.A(),
+            folderlist: Ember.A(),
+            folderstack: Ember.A(),
+            shares: function () {
+                return this.get("dataArray");
+            }.property("dataArray"),
+            newFolderName: "",
+            headers: {
+                Authorization: sessionKey
+            },
+            uploadURL: function () {
+                return baseURL + '/apidoc/files/upload/' + this.get('folderlist.shareid');
+            }.property('folderList.shareid'),
+            uploadFile: null,
+            isLoading: false,
+            isRoot: function() {
+                return (this.get("folderlist").queryParams.path == "")
+            }.property("folderlist.queryParams.path"),
+            actions: {
+                submitAction: function () {
+                    this.set('isLoading', true);
+                    var self = this;
+                    // We really want to inject RELATEDS
+                    var injectableFiles = [];
+                    this.get("filelist").forEach(function (file) {
+                        injectableFiles.pushObject({
+                            "ID": file.link,
+                            "LABEL": file.name,
+                            "TOOLTIP": "file.label",
+                            "TYPE": "PIO",
+                            "URL": "http://api.point.io/ui-html5/LinkViewer/app.html?id=" + file.link
+                        });
+                    });
+                    var injectableFacts = {
+                        'REQUEST': {
+                            'INPUT': {
+                                'RELATEDS': injectableFiles,
+                                'FIELDS': [],
+                                'FACTS': []
+                            }
+                        }
+                    };
+                    Ember.$.ajax({
+                        type: "PUT",
+                        async: true,
+                        url: baseURL + '/messages/injectListJSON/' + taskid + '?Authorization=' + sessionKey,
+                        data: JSON.stringify(injectableFacts),
+                        dataType: 'json',
+                        contentType: 'application/json',
+                        success: function (data) {
+                            self.set('isLoading', false);
+                            //$('#emberForm').submit();
+                        }
+                    });
+                    return true; //this bubbles the action up
+                },
+                addFile: function (share) {
+                    this.set('isLoading', true);
+                    var self = this;
+                    //create a link
+                    var linkURL = "";
+                    //v3
+                    var servercall = baseURL + "/apidoc/links/create/" + share.shareid + "?Authorization=" + sessionKey;
+                    $.ajax({
+                        type: "POST",
+                        async: false,
+                        data: {
+                            'containerid': share.containerid,
+                            'path': share.path,
+                            'fileid': share.fileid,
+                            'filename': share.name
+                        },
+                        url: servercall,
+                        success: function (data) {
+                            linkURL = data.RESPONSE.linkid;
+                            self.set('isLoading', false);
+                        }
+                    });
+                    //add it to the list
+                    var fileArray = this.get("filelist");
+                    fileArray.pushObject({name: share.name, link: linkURL, label: share.name});
+                    this.set("isFileListEmpty", false);
+                },
+                removeFile: function (id) {
+                    var fileList = this.get('filelist');
+                    fileList.removeObject(id);
+                    if (fileList.length == 0)
+                        this.set("isFileListEmpty", true);
+                },
+                createFolderClick: function (shareid, containerid, path, modalId) {
+                    var self = this;
+                    this.set('isLoading', true);
+                    var servercall = baseURL + "/apidoc/folders/create/" + shareid
+                    $.ajax({
+                        type: "POST",
+                        async: false,
+                        data: {'containerid': containerid, 'path': path, 'foldername': this.get('newFolderName')},
+                        url: servercall,
+                        headers: {
+                            Authorization: sessionKey
+                        },
+                        cache: false,
+                        success: function (data) {
+                            self.send('modalFinished', modalId);
+                        }
+                    });
+                },
+                modalFinished: function (modalId) {
+                    $('#'+modalId).modal("hide");
+                    var thisFolder = this.get("folderlist");
+                    this.send('openShare', thisFolder.sharename, thisFolder.sharetype, thisFolder.shareid, thisFolder.queryParams.path, thisFolder.queryParams.containerid);
+                    this.send('setLoading', false);
+                },
+                returnToSites: function() {
+                    this.set('showShareList', true);
+                },
+                navigateToParent: function () {
+                    if (this.get('folderstack').length == 0) {
+                        this.send('returnToSites');
+                    }
+                    else {
+                        var current = this.get('folderstack').pop();
+                        this.set('folderlist', current);
+                    }
+                },
+                setLoading: function(state) {
+                  this.set('isLoading', state);
+                },
+                openShare: function (sharename, sharetype, shareid, path, containerid) {
+                    var self = this;
+                    if (typeof containerid != 'undefined')
+                        self.set('containerid', containerid);
+                    else
+                        self.set('containerid', "");
+                    if (typeof path != 'undefined')
+                        self.set('path', path);
+                    else
+                        self.set('path', "");
+                    var queryParams = {path: self.get('path'), containerid: self.get('containerid')};
+                    Ember.$.ajax({
+                        async: false,
+                        url: baseURL + '/apidoc/folders/list/' + shareid,
+                        data: queryParams,
+                        headers: {
+                            Authorization: sessionKey
+                        },
+                        success: function (data) {
+                            var sharesList = Ember.A();
+                            (data.RESPONSE.RESULT.forEach(function (share) {
+                                share.isDir = (share.type === 'DIR');
+                                var params = [];
+                                if (share.path) {
+                                    params.push('path=' + encodeURIComponent(share.path))
+                                }
+                                if (share.containerid) {
+                                    params.push('containerid=' + encodeURIComponent(share.containerid))
+                                }
+                                if (share.fileid) {
+                                    params.push('fileid=' + encodeURIComponent(share.fileid))
+                                }
+                                if (share.name) {
+                                    params.push('filename=' + encodeURIComponent(share.name))
+                                }
+                                params.push('asBinary=true');
+
+                                share.downloadURL = baseURL + '/apidoc/files/download/' + share.shareid + '?Authorization=' + sessionKey + '&' + params.join("&")
+
+                                sharesList.pushObject(share);
+                            }));
+                            if (self.get('folderlist.shareid') && (containerid) && (self.get('folderlist.queryParams.containerid') != containerid)) {
+                                // Push the previous folder if there IS a previous folder & if this is NOT the top folder & we aren't just refreshing the current folder
+                                self.get('folderstack').push({
+                                    shares: self.get('folderlist.shares'),
+                                    shareid: self.get('folderlist.shareid'),
+                                    sharename: self.get('folderlist.sharename'),
+                                    sharetype: self.get('folderlist.sharetype'),
+                                    queryParams: self.get('folderlist.queryParams')
+                                });
+                                //console.log(containerid + " Push & length is now: " + self.get('folderstack').length);
+                            }
+                            // Set the current folder
+                            self.set('folderlist.shares', sharesList);
+                            self.set('folderlist.shareid', shareid);
+                            self.set('folderlist.sharename', sharename);
+                            self.set('folderlist.sharetype', sharetype);
+                            self.set('folderlist.queryParams', queryParams);
+                        }
+                    });
+                    this.set('showShareList', false);
+                }
+            }
+        });
+
+        App.CreateFolderRoute = Ember.Route.extend({
+            model: function (params, options) {
+                var model = {};
+                model.shareid = params.shareid
+                model.containerid = options.queryParams.containerid
+                model.path = options.queryParams.path
+                model.sessionKey = sessionKey
+                model.url = document.URL
+                model.baseURL = baseURL
+                return model;
+            }
+        });
+
+        App.UploadFileRoute = Ember.Route.extend({
+            model: function (params, options) {
+                var model = {};
+                model.shareid = params.shareid
+                model.containerid = options.queryParams.containerid
+                model.path = options.queryParams.path
+                model.sessionKey = sessionKey
+                model.url = document.URL
+                model.baseURL = baseURL
+                return model;
+            }
+        });
+        App.FileUploadComponent = EmberUploader.FileField.extend({
+            multiple: true,
+            url: '',
+            filesDidChange: function (files) {
+                var self = this;
+                var uploadUrl = this.get('url');
+
+                var uploader = EmberUploader.Uploader.create({
+                    url: uploadUrl,
+                    paramName: 'uploadfile'
+                });
+                uploader.on('didUpload', function (e) {
+                    self.sendAction('action', self.get('actionParams'));
+                });
+                if (!Ember.isEmpty(files)) {
+                    this.sendAction('startAction', true);
+                    uploader.uploadSerial(files, this.get('params'), this.get('headers'));
+                }
+            }
+        });
+
+    </script>
+    <script type="text/x-handlebars" data-template-name="file">
+
+        <div class="panel panel-info" style="margin-top:15px;margin-bottom:15px;">
+            <div class="panel-heading">
+                <h4 class="panel-title">
+                    <a data-toggle="collapse" data-parent="#accordion" href="#collapseA">Attach Related Files</a>
+                </h4>
+            </div>
+            <div id="collapseA" class="panel-collapse collapse in">
+                <div class="container-fluid">
+                    <div id="content panel-group" id="accordion">
+                        <div style="padding: 10px;">
+                            <div class="panel panel-default">
+                                <div id='bod' class="panel-body">
+                                    <div class="row">
+                                        <div class="col-md-9">
+                                            {{#if controller.showShareList}}
+                                            <div id="sharelist" class="row-fluid">
+                                                {{partial "sharelist"}}
+                                            </div>
+                                            {{/if}}
+                                            {{#unless controller.showShareList}}
+                                            <div id="folderlist" class="row-fluid">
+                                                {{partial "_folderlist"}}
+                                            </div>
+                                            {{/unless}}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div align="center" style={{unless controller.isLoading "display:none;"}}>
+                        <img src="/assets/images/throbber.gif"/>
+                    </div>
+                    {{#unless controller.isFileListEmpty}}
+                    <div id="content panel-group" id="accordion">
+                        <div style="padding: 10px;">
+                            <div class="panel panel-default">
+                                <div class="panel-heading">
+                                    <h3 class="panel-title">Attached Files</h3>
+                                </div>
+                                <div id='bod' class="panel-body">
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-4 col-md-4"><label>File Name</label></div>
+                                        <div class="hidden-xs col-sm-6 col-md-6"><label>File Label</label></div>
+                                    </div>
+                                    {{#each file in controller.filelist}}
+                                    <div class="row">
+                                        <div class="col-xs-12 col-sm-4 col-md-4"><p class="form-control-static">{{file.name}}</p></div>
+                                        <div class="col-xs-12 col-sm-6 col-md-6">{{input type="text" class="form-control"
+                                            value=file.label}}
+                                        </div>
+                                        <div class="hidden-xs col-sm-2 col-md-2">
+                                            <button class="btn btn-danger btn-sm" {{action
+                                            "removeFile" file}}>Remove&nbsp;<span
+                                                class="glyphicon glyphicon-trash"></span></button>
+                                        </div>
+                                    </div>
+                                    {{/each}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {{/unless}}
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-handlebars" data-template-name="_sharelist">
+        <table class="table table-bordered table-striped table-condensed col-md-10">
+            <thead>
+            <tr>
+                <th>Name</th>
+                <th>Site Type</th>
+            </tr>
+            </thead>
+            <tbody>
+            {{#each share in controller.shares}}
+            <tr>
+                <td><a {{action "openShare" share.share.name share.share.type share.share.id share.share.path share.share.containerid}}>{{share.share.name}}</a></td>
+                <td>{{share.share.type}}</td>
+            </tr>
+            {{/each}}
+            </tbody>
+        </table>
+    </script>
+
+    <script type="text/x-handlebars" data-template-name="_createFolder">
+        <div class="modal fade" id="button-modal-create" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form id="createfolderform" class="form-horizontal" enctype="application/x-www-form-urlencoded" method="post">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                            <h4 class="modal-title" id="myModalLabel">New Folder</h4>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                {{input id="createfolder" name="foldername" class="form-control" type="text" value=controller.newFolderName}}
+                                <button class="btn btn-default" type="submit" {{action "createFolderClick" folderlist.shareid containerid path "button-modal-create"}}>Create</button>
+                            </div>
+                            <div align="center" style={{unless controller.isLoading "display:none;"}}>
+                                <img src="/assets/images/throbber.gif"/>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-handlebars" data-template-name="_uploadFile">
+        <div class="modal fade" id="button-modal-upload" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+            <div class="modal-dialog">
+                <div class="modal-content">
+                    <form id="fileuploadform" class="form-horizontal" enctype="multipart/form-data" method="post">
+                        <div class="modal-header">
+                            <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                                <span aria-hidden="true">&times;</span>
+                            </button>
+                            <h4 class="modal-title" id="myModalLabel">File Upload</h4>
+                        </div>
+                        <div class="modal-body">
+                            <div class="form-group">
+                                {{file-upload class="form-control" url=controller.uploadURL
+                                params=controller.folderlist.queryParams
+                                headers=controller.headers action='modalFinished'
+                                actionParams="button-modal-upload" startAction='setLoading'}}
+                            </div>
+                            <div align="center" style={{unless controller.isLoading "display:none;"}}>
+                                <img src="/assets/images/throbber.gif"/>
+                            </div>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </script>
+
+    <script type="text/x-handlebars" data-template-name="_folderlist">
+        <div class="panel-heading">
+            <h2 class="panel-title">{{controller.folderlist.sharename}}<span style="float:right;"><em>{{controller.folderlist.sharetype}}</em></span></h2>
+        </div>
+        <div id="browseOnly">
+            <!--<button type="button" class="btn btn-default {{if controller.isRoot 'disabled'}}" {{action "navigateToParent" controller.folderlist.shareid}}>-->
+            <!--<span class="glyphicon glyphicon-level-up"></span> &nbsp;Back to Parent-->
+            <!--</button>-->
+            {{partial 'uploadFile'}}
+            {{partial 'createFolder'}}
+        </div>
+        <table class="table table-bordered table-striped col-md-12">
+            <thead>
+            <tr>
+                <th><a {{action "returnToSites"}}>Home</a> <a {{action "navigateToParent" controller.folderlist.shareid}}>/{{controller.folderlist.queryParams.path}}</a></th>
+                <th></th>
+            </tr>
+            </thead>
+            <tbody>
+            {{#each controller.folderlist.shares as |share|}}
+            <tr>
+                <td>
+                    {{#if share.isDir}}
+                    <a {{action "openShare" controller.folderlist.sharename controller.folderlist.sharetype share.shareid share.path share.containerid}}>
+                    <span class="glyphicon glyphicon-folder-open"></span> &nbsp;
+                    {{share.name}}
+                    </a>
+                    {{/if}}
+                    {{#unless share.isDir}}
+                    <a href="{{share.downloadURL}}">
+                        <span class="glyphicon glyphicon-file" style="color: silver;"></span> &nbsp;
+                        {{share.name}}
+                    </a>
+                    {{/unless}}
+                </td>
+                <td align="center">
+                    {{#unless share.isDir}}
+                    <!--<a class="btn btn-default" href="{{share.downloadURL}}">-->
+                        <!--<span class="glyphicon glyphicon-download"></span> &nbsp; Download-->
+                    <!--</a>-->
+                    <button class="btn btn-success" {{action
+                    "addFile" share}}>
+                    <span class="glyphicon glyphicon-paperclip"></span> &nbsp; Attach File
+                    </button>
+                    {{/unless}}
+                </td>
+            </tr>
+            {{/each}}
+            </tbody>
+            <tfoot>
+                <tr>
+                    <td colspan="2">
+                        <a data-insertid="1" class="btn btn-success" data-toggle="modal" data-target="#button-modal-upload">Upload Files</a>
+                        <a data-insertid="1" class="btn btn-primary" data-toggle="modal" data-target="#button-modal-create">Create Folder</a>
+                    </td>
+                </tr>
+            </tfoot>
+        </table>
+    </script>
